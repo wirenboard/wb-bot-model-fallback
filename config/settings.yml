@@ -1,0 +1,14 @@
+plugins:
+  wb_bot_model_fallback_enabled:
+    default: false
+    client: false
+  wb_bot_model_fallback_daily_calls:
+    default: 40
+    min: 1
+    max: 100000
+    client: false
+  wb_bot_model_fallback_llm:
+    default: ""
+    type: enum
+    enum: "DiscourseAi::Configuration::LlmEnumerator"
+    client: false
