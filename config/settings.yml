@@ -2,10 +2,18 @@ plugins:
   wb_bot_model_fallback_enabled:
     default: false
     client: false
-  wb_bot_model_fallback_daily_calls:
-    default: 40
+  wb_bot_model_fallback_daily_answers:
+    default: 20
     min: 1
-    max: 100000
+    max: 10000
+    client: false
+  wb_bot_model_fallback_hours:
+    default: 24
+    min: 1
+    max: 168
+    client: false
+  wb_bot_model_fallback_exempt_staff:
+    default: true
     client: false
   wb_bot_model_fallback_llm:
     default: ""

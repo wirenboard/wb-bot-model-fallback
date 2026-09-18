@@ -16,19 +16,54 @@ RSpec.describe WbBotModelFallback::ForeignReasoning do
     )
   end
   fab!(:first_question) do
-    Fabricate(:post, topic: pm, user: user, post_number: 1, raw: "Первый вопрос", created_at: 10.minutes.ago)
+    Fabricate(
+      :post,
+      topic: pm,
+      user: user,
+      post_number: 1,
+      raw: "Первый вопрос",
+      created_at: 10.minutes.ago,
+    )
   end
   fab!(:primary_answer) do
-    Fabricate(:post, topic: pm, user: bot_user, post_number: 2, raw: "Ответ основной", created_at: 9.minutes.ago)
+    Fabricate(
+      :post,
+      topic: pm,
+      user: bot_user,
+      post_number: 2,
+      raw: "Ответ основной",
+      created_at: 9.minutes.ago,
+    )
   end
   fab!(:second_question) do
-    Fabricate(:post, topic: pm, user: user, post_number: 3, raw: "Второй вопрос", created_at: 8.minutes.ago)
+    Fabricate(
+      :post,
+      topic: pm,
+      user: user,
+      post_number: 3,
+      raw: "Второй вопрос",
+      created_at: 8.minutes.ago,
+    )
   end
   fab!(:fallback_answer) do
-    Fabricate(:post, topic: pm, user: bot_user, post_number: 4, raw: "Ответ запасной", created_at: 7.minutes.ago)
+    Fabricate(
+      :post,
+      topic: pm,
+      user: bot_user,
+      post_number: 4,
+      raw: "Ответ запасной",
+      created_at: 7.minutes.ago,
+    )
   end
   fab!(:third_question) do
-    Fabricate(:post, topic: pm, user: user, post_number: 5, raw: "Третий вопрос", created_at: 6.minutes.ago)
+    Fabricate(
+      :post,
+      topic: pm,
+      user: user,
+      post_number: 5,
+      raw: "Третий вопрос",
+      created_at: 6.minutes.ago,
+    )
   end
 
   def remember_model(post, model, text, encrypted)
@@ -90,7 +125,8 @@ RSpec.describe WbBotModelFallback::ForeignReasoning do
   end
 
   it "keeps the text of the answers whose reasoning was dropped" do
-    text = described_class.with_model(fallback.id) { history }.map { |m| m[:content].to_s }.join("\n")
+    text =
+      described_class.with_model(fallback.id) { history }.map { |m| m[:content].to_s }.join("\n")
     expect(text).to include("Ответ основной", "Ответ запасной")
   end
 

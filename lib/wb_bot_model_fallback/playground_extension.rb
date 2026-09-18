@@ -14,12 +14,16 @@ module ::WbBotModelFallback
 
       if target
         @bot =
-          DiscourseAi::Agents::Bot.as(original_bot.bot_user, agent: original_bot.agent, model: target)
+          DiscourseAi::Agents::Bot.as(
+            original_bot.bot_user,
+            agent: original_bot.agent,
+            model: target,
+          )
         Rails.logger.info(
           "[wb-bot-model-fallback] topic=#{post.topic_id} post=#{post.id} user=#{post.user_id} " \
-            "calls_24h=#{selector.calls_in_window} " \
-            "threshold=#{SiteSetting.wb_bot_model_fallback_daily_calls} " \
-            "model #{original_bot.model.id} -> #{target.id}",
+            "answers=#{selector.primary_answers_in_window} " \
+            "threshold=#{SiteSetting.wb_bot_model_fallback_daily_answers} " \
+            "until_ttl=#{selector.latch_ttl}s model #{original_bot.model.id} -> #{target.id}",
         )
       end
 

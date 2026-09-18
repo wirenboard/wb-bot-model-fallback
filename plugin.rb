@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 # name: wb-bot-model-fallback
-# about: Переводит ответы ИИ-бота на запасную (более дешёвую) модель, когда пользователь за сутки сделал больше заданного числа обращений к модели
-# version: 0.1.0
+# about: После заданного числа ответов основной моделью за сутки переводит пользователя на запасную (более дешёвую) модель на сутки; сотрудники не ограничиваются
+# version: 0.2.0
 # authors: Wiren Board
 # url: https://github.com/wirenboard/wb-bot-model-fallback
 # required_version: 2026.7.0

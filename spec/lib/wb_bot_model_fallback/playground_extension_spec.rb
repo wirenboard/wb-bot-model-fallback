@@ -19,7 +19,9 @@ RSpec.describe WbBotModelFallback::PlaygroundExtension do
       ],
     )
   end
-  fab!(:question) { Fabricate(:post, topic: pm, user: user, post_number: 1, raw: "Как подключить реле?") }
+  fab!(:question) do
+    Fabricate(:post, topic: pm, user: user, post_number: 1, raw: "Как подключить реле?")
+  end
 
   let(:agent) do
     AiAgent
@@ -38,14 +40,29 @@ RSpec.describe WbBotModelFallback::PlaygroundExtension do
     SiteSetting.ai_embeddings_enabled = false
     enable_current_plugin
     SiteSetting.wb_bot_model_fallback_llm = fallback.id.to_s
-    SiteSetting.wb_bot_model_fallback_daily_calls = 3
+    SiteSetting.wb_bot_model_fallback_daily_answers = 3
+    Discourse.redis.del(WbBotModelFallback::Selector.latch_key(user.id))
   end
 
-  after { AiAgent.agent_cache.flush! }
+  after do
+    AiAgent.agent_cache.flush!
+    Discourse.redis.del(WbBotModelFallback::Selector.latch_key(user.id))
+  end
 
-  def log_calls(count)
+  # ответы основной моделью: у каждого свой post_id и по три вызова, как в настоящем журнале
+  def log_answers(count)
     count.times do
-      Fabricate(:ai_api_audit_log, user_id: user.id, feature_name: "bot", created_at: 1.hour.ago)
+      answered = Fabricate(:post, user: user) # своя тема: в историю этого диалога не попадает
+      3.times do
+        Fabricate(
+          :ai_api_audit_log,
+          user_id: user.id,
+          post_id: answered.id,
+          llm_id: primary.id,
+          feature_name: "bot",
+          created_at: 1.hour.ago,
+        )
+      end
     end
   end
 
@@ -64,30 +81,47 @@ RSpec.describe WbBotModelFallback::PlaygroundExtension do
   end
 
   it "answers with the primary model below the threshold" do
-    log_calls(2)
+    log_answers(2)
     reply, = reply_to(question)
     expect(model_id_of(reply)).to eq(primary.id)
   end
 
   it "answers with the fallback model once the threshold is reached and restores the bot" do
-    log_calls(3)
+    log_answers(3)
     reply, = reply_to(question)
     expect(model_id_of(reply)).to eq(fallback.id)
     expect(playground.bot.model).to eq(primary)
   end
 
+  it "keeps answering with the fallback model during the period" do
+    log_answers(3)
+    reply_to(question)
+    AiApiAuditLog.delete_all
+    reply, = reply_to(question)
+    expect(model_id_of(reply)).to eq(fallback.id)
+  end
+
   it "changes nothing when the plugin is disabled" do
     SiteSetting.wb_bot_model_fallback_enabled = false
-    log_calls(10)
+    log_answers(10)
     reply, = reply_to(question)
     expect(model_id_of(reply)).to eq(primary.id)
   end
 
   context "with reasoning saved from an earlier answer of the primary model" do
     fab!(:earlier_answer) do
-      Fabricate(:post, topic: pm, user: bot_user, post_number: 2, raw: "Ранний ответ", created_at: 5.minutes.ago)
+      Fabricate(
+        :post,
+        topic: pm,
+        user: bot_user,
+        post_number: 2,
+        raw: "Ранний ответ",
+        created_at: 5.minutes.ago,
+      )
     end
-    fab!(:follow_up) { Fabricate(:post, topic: pm, user: user, post_number: 3, raw: "А если на 24 В?") }
+    fab!(:follow_up) do
+      Fabricate(:post, topic: pm, user: user, post_number: 3, raw: "А если на 24 В?")
+    end
 
     before do
       earlier_answer.custom_fields[DiscourseAi::AiBot::POST_AI_LLM_MODEL_ID_FIELD] = primary.id
@@ -126,7 +160,7 @@ RSpec.describe WbBotModelFallback::PlaygroundExtension do
     end
 
     it "does not send the primary model's reasoning to the fallback model" do
-      log_calls(3)
+      log_answers(3)
       reply, prompts = reply_to(follow_up)
       expect(model_id_of(reply)).to eq(fallback.id)
       expect(encrypted_sent(prompts)).to be_empty
