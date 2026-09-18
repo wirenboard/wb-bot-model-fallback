@@ -41,12 +41,18 @@ RSpec.describe WbBotModelFallback::PlaygroundExtension do
     enable_current_plugin
     SiteSetting.wb_bot_model_fallback_llm = fallback.id.to_s
     SiteSetting.wb_bot_model_fallback_daily_answers = 3
-    Discourse.redis.del(WbBotModelFallback::Selector.latch_key(user.id))
+    clear_keys
   end
 
   after do
     AiAgent.agent_cache.flush!
-    Discourse.redis.del(WbBotModelFallback::Selector.latch_key(user.id))
+    clear_keys
+  end
+
+  def clear_keys
+    %i[latch_key switch_notice_key return_notice_key].each do |k|
+      Discourse.redis.del(WbBotModelFallback::Selector.public_send(k, user.id))
+    end
   end
 
   # ответы основной моделью: у каждого свой post_id и по три вызова, как в настоящем журнале
@@ -99,6 +105,43 @@ RSpec.describe WbBotModelFallback::PlaygroundExtension do
     AiApiAuditLog.delete_all
     reply, = reply_to(question)
     expect(model_id_of(reply)).to eq(fallback.id)
+  end
+
+  it "tells the user once that the lighter version answers now, without naming models" do
+    log_answers(3)
+    reply, = reply_to(question)
+    expect(reply.raw).to match(
+      /\A> Вы задали помощнику 3 вопроса за сутки\. До \d\d\.\d\d в \d\d:\d\d \(МСК\)/,
+    )
+    expect(reply.raw).to end_with("Ответ")
+    expect(reply.raw).not_to include(fallback.display_name, primary.display_name)
+    expect(reply.revisions).to be_empty
+
+    second, = reply_to(question)
+    expect(model_id_of(second)).to eq(fallback.id)
+    expect(second.raw).not_to start_with(">")
+  end
+
+  it "tells the user once that the main version is back after the period" do
+    log_answers(3)
+    reply_to(question)
+    Discourse.redis.del(WbBotModelFallback::Selector.latch_key(user.id))
+    AiApiAuditLog.update_all("created_at = created_at - interval '25 hours'")
+
+    back, = reply_to(question)
+    expect(model_id_of(back)).to eq(primary.id)
+    expect(back.raw).to start_with("> Снова отвечает основная версия помощника.")
+
+    later, = reply_to(question)
+    expect(later.raw).not_to start_with(">")
+  end
+
+  it "shows no notice when the texts are empty" do
+    SiteSetting.wb_bot_model_fallback_notice_switch = ""
+    log_answers(3)
+    reply, = reply_to(question)
+    expect(model_id_of(reply)).to eq(fallback.id)
+    expect(reply.raw).to eq("Ответ")
   end
 
   it "changes nothing when the plugin is disabled" do

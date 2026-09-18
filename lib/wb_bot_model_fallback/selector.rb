@@ -11,9 +11,15 @@ module ::WbBotModelFallback
   # диалоги (feature "bot") и ответы автоматизаций (feature "automation - …", например ночной бот).
   # Сотрудники (staff) по умолчанию не ограничены.
   #
-  # Срок — ключ в Redis со временем жизни. Ставится один раз (NX) и не продлевается.
+  # Срок — ключ в Redis со временем жизни. Ставится один раз (NX) и не продлевается. Вместе с ним
+  # ставятся два флага для сообщений пользователю: «перешёл на облегчённую версию» (снимается после
+  # первого удачного ответа запасной модели) и «был на облегчённой» (снимается после первого удачного
+  # ответа основной модели, когда срок кончился). Флаги снимаются только после удачного ответа, чтобы
+  # сообщение не потерялось, если ответ не получился.
   class Selector
     COUNTED_FEATURES_SQL = "(feature_name = 'bot' OR feature_name LIKE 'automation - %')"
+    # сколько после конца срока помнить, что пользователь был на запасной, чтобы сказать о возврате
+    RETURN_NOTICE_GRACE = 7.days
 
     def self.fallback_llm_id
       value = SiteSetting.wb_bot_model_fallback_llm.to_s.strip
@@ -26,6 +32,14 @@ module ::WbBotModelFallback
 
     def self.latch_key(user_id)
       "wb_bot_model_fallback:until:#{user_id}"
+    end
+
+    def self.switch_notice_key(user_id)
+      "wb_bot_model_fallback:notice_switch:#{user_id}"
+    end
+
+    def self.return_notice_key(user_id)
+      "wb_bot_model_fallback:notice_return:#{user_id}"
     end
 
     def initialize(post:, current_model:)
@@ -55,6 +69,18 @@ module ::WbBotModelFallback
       Discourse.redis.exists?(self.class.latch_key(author.id))
     end
 
+    # Сообщение «перешёл на облегчённую версию» ещё не показано: снимаем флаг, если он был.
+    def take_switch_notice!
+      Discourse.redis.del(self.class.switch_notice_key(author.id)).to_i > 0
+    end
+
+    # Срок кончился, а о возврате на основную модель пользователю ещё не сказали.
+    def take_return_notice!
+      return false if latched?
+
+      Discourse.redis.del(self.class.return_notice_key(author.id)).to_i > 0
+    end
+
     # Секунды до конца срока на запасной модели; nil — срока нет.
     def latch_ttl
       ttl = Discourse.redis.ttl(self.class.latch_key(author.id))
@@ -80,11 +106,21 @@ module ::WbBotModelFallback
     private
 
     def latch!
+      seconds = self.class.window.to_i
+      set =
+        Discourse.redis.set(
+          self.class.latch_key(author.id),
+          Time.zone.now.to_i,
+          ex: seconds,
+          nx: true,
+        )
+      return if !set
+
+      Discourse.redis.set(self.class.switch_notice_key(author.id), 1, ex: seconds)
       Discourse.redis.set(
-        self.class.latch_key(author.id),
-        Time.zone.now.to_i,
-        ex: self.class.window.to_i,
-        nx: true,
+        self.class.return_notice_key(author.id),
+        1,
+        ex: seconds + RETURN_NOTICE_GRACE.to_i,
       )
     end
   end

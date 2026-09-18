@@ -2,7 +2,7 @@
 
 # name: wb-bot-model-fallback
 # about: После заданного числа ответов основной моделью за сутки переводит пользователя на запасную (более дешёвую) модель на сутки; сотрудники не ограничиваются
-# version: 0.2.0
+# version: 0.3.0
 # authors: Wiren Board
 # url: https://github.com/wirenboard/wb-bot-model-fallback
 # required_version: 2026.7.0
@@ -19,6 +19,7 @@ after_initialize do
   require_relative "lib/wb_bot_model_fallback/selector"
   require_relative "lib/wb_bot_model_fallback/foreign_reasoning"
   require_relative "lib/wb_bot_model_fallback/playground_extension"
+  require_relative "lib/wb_bot_model_fallback/notice"
 
   # Модель ответа выбирается при создании бота; подменяем её для одного ответа.
   DiscourseAi::AiBot::Playground.prepend(WbBotModelFallback::PlaygroundExtension)

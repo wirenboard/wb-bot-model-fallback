@@ -15,6 +15,14 @@ plugins:
   wb_bot_model_fallback_exempt_staff:
     default: true
     client: false
+  wb_bot_model_fallback_notice_switch:
+    default: "Вы задали помощнику %{questions} за сутки. До %{until} (МСК) на вопросы отвечает облегчённая версия помощника, потом снова основная."
+    textarea: true
+    client: false
+  wb_bot_model_fallback_notice_return:
+    default: "Снова отвечает основная версия помощника."
+    textarea: true
+    client: false
   wb_bot_model_fallback_llm:
     default: ""
     type: enum

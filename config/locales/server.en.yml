@@ -1,5 +1,7 @@
 en:
   site_settings:
+    wb_bot_model_fallback_notice_switch: "Notice at the top of the first reply from the lighter version. Placeholders: %{questions} is the threshold with the Russian word for questions, %{answers} is the bare number, %{until} is the end of the period in Moscow time. Empty disables it. Do not name the models."
+    wb_bot_model_fallback_notice_return: "Notice at the top of the first reply from the main version after the period ends. Empty disables it."
     wb_bot_model_fallback_enabled: "Move a user to the AI bot's fallback model once they have received the configured number of replies from the primary model within a day. Does nothing until a fallback model is selected."
     wb_bot_model_fallback_daily_answers: "How many replies from the primary model a user gets within a rolling day. The next question moves them to the fallback model. Counts bot replies in PMs and automation replies, not individual model calls; replies from the fallback model are not counted."
     wb_bot_model_fallback_hours: "For how many hours the user stays on the fallback model; the same window is used to count primary-model replies. The period is not extended, and the count starts over afterwards."

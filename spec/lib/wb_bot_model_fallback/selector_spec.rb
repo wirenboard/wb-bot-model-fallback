@@ -11,7 +11,9 @@ RSpec.describe WbBotModelFallback::Selector do
 
   def clear_latches
     [user, other_user, moderator, admin].each do |u|
-      Discourse.redis.del(described_class.latch_key(u.id))
+      %i[latch_key switch_notice_key return_notice_key].each do |k|
+        Discourse.redis.del(described_class.public_send(k, u.id))
+      end
     end
   end
 
@@ -100,6 +102,25 @@ RSpec.describe WbBotModelFallback::Selector do
     log_answers(3, at: 1.hour.ago)
     expect(selected).to eq(fallback)
     expect(latch_ttl).to be_within(5).of(6.hours.to_i)
+  end
+
+  it "raises the notice flags once when switching" do
+    log_answers(3)
+    selector = described_class.new(post: post, current_model: primary)
+    selector.fallback_model
+    expect(selector.take_switch_notice!).to eq(true)
+    expect(selector.take_switch_notice!).to eq(false)
+    expect(Discourse.redis.ttl(described_class.return_notice_key(user.id))).to be > latch_ttl
+  end
+
+  it "reports the return to the main model once, and only after the period" do
+    log_answers(3)
+    selector = described_class.new(post: post, current_model: primary)
+    selector.fallback_model
+    expect(selector.take_return_notice!).to eq(false)
+    Discourse.redis.del(described_class.latch_key(user.id))
+    expect(selector.take_return_notice!).to eq(true)
+    expect(selector.take_return_notice!).to eq(false)
   end
 
   it "counts automation replies such as the weekend bot" do
