@@ -2,7 +2,7 @@
 
 # name: wb-bot-model-fallback
 # about: После заданного числа ответов основной моделью за сутки переводит пользователя на запасную (более дешёвую) модель на сутки; сотрудники не ограничиваются
-# version: 0.3.0
+# version: 0.3.1
 # authors: Wiren Board
 # url: https://github.com/wirenboard/wb-bot-model-fallback
 # required_version: 2026.7.0

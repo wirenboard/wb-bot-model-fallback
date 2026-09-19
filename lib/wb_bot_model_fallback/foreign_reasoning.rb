@@ -36,22 +36,29 @@ module ::WbBotModelFallback
       (time.to_r * 1_000_000).round
     end
 
+    # Посты темы, чьи рассуждения и идентификаторы вызовов не должны попасть к текущей модели.
+    # Отвечает запасная — чужое всё, что написала не она, включая старые ответы без поля модели
+    # (до 11.05.2026 его не было): их вызовы тоже могут нести идентификаторы другой модели.
+    # Отвечает основная — только посты, у которых записана другая модель; без переключений
+    # поведение прежнее.
     def self.foreign_stamps_for(post)
       model_id = Thread.current[CURRENT_MODEL]
       return nil if model_id.nil? || post&.topic_id.nil?
 
-      PostCustomField
-        .joins(:post)
-        .where(
-          name: DiscourseAi::AiBot::POST_AI_LLM_MODEL_ID_FIELD,
-          posts: {
-            topic_id: post.topic_id,
-          },
-        )
-        .where.not(value: model_id.to_s)
-        .pluck("posts.created_at")
-        .map { |time| stamp(time) }
-        .to_set
+      field = DiscourseAi::AiBot::POST_AI_LLM_MODEL_ID_FIELD
+      topic_posts = Post.where(topic_id: post.topic_id)
+      scope =
+        if model_id == Selector.fallback_llm_id
+          same_model = PostCustomField.where(name: field, value: model_id.to_s).select(:post_id)
+          # посты людей тоже попадут в набор, но рассуждений и данных провайдера у них нет
+          topic_posts.where.not(id: same_model)
+        else
+          other_model =
+            PostCustomField.where(name: field).where.not(value: model_id.to_s).select(:post_id)
+          topic_posts.where(id: other_model)
+        end
+
+      scope.pluck(:created_at).map { |time| stamp(time) }.to_set
     end
 
     module BuilderClassExtension
@@ -64,11 +71,15 @@ module ::WbBotModelFallback
     end
 
     module BuilderExtension
+      # У чужого сообщения убираются рассуждение и данные провайдера. В данных провайдера лежит
+      # идентификатор вызова инструмента (fc_…): Responses API связывает такой вызов с рассуждением
+      # того же ответа и без него отвергает запрос — HTTP 400 «function_call was provided without its
+      # required reasoning item». Без идентификатора вызов уходит как обычный элемент, без этой связи.
       def push(**kwargs)
         stamps = Thread.current[FOREIGN_STAMPS]
-        if stamps && kwargs[:thinking] && kwargs[:created_at] &&
+        if stamps && kwargs[:created_at] &&
              stamps.include?(ForeignReasoning.stamp(kwargs[:created_at]))
-          kwargs = kwargs.except(:thinking)
+          kwargs = kwargs.except(:thinking, :provider_data)
         end
 
         super(**kwargs)

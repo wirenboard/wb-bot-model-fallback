@@ -66,17 +66,19 @@ RSpec.describe WbBotModelFallback::ForeignReasoning do
     )
   end
 
-  def remember_model(post, model, text, encrypted)
+  # настоящая цепочка Responses API: рассуждение, вызов инструмента с идентификатором fc_…,
+  # результат инструмента и текст ответа
+  def remember_model(post, model, text, encrypted, call:)
     post.custom_fields[DiscourseAi::AiBot::POST_AI_LLM_MODEL_ID_FIELD] = model.id
     post.save_custom_fields
     PostCustomPrompt.create!(
       post: post,
       custom_prompt: [
         [
-          text,
-          bot_user.username,
-          nil,
-          nil,
+          { name: "search", arguments: { query: "реле" } }.to_json,
+          "call_#{call}",
+          "tool_call",
+          "search",
           {
             "message" => "рассуждение",
             "provider_info" => {
@@ -86,15 +88,19 @@ RSpec.describe WbBotModelFallback::ForeignReasoning do
               },
             },
           },
+          { "open_ai_responses" => { "id" => call } },
         ],
+        [{ result: "найдено" }.to_json, "call_#{call}", "tool", "search"],
+        [text, bot_user.username, nil, nil],
       ],
     )
   end
 
   before do
     enable_current_plugin
-    remember_model(primary_answer, primary, "Ответ основной", "enc-primary")
-    remember_model(fallback_answer, fallback, "Ответ запасной", "enc-fallback")
+    SiteSetting.wb_bot_model_fallback_llm = fallback.id.to_s
+    remember_model(primary_answer, primary, "Ответ основной", "enc-primary", call: "fc_primary")
+    remember_model(fallback_answer, fallback, "Ответ запасной", "enc-fallback", call: "fc_fallback")
   end
 
   def history
@@ -110,6 +116,10 @@ RSpec.describe WbBotModelFallback::ForeignReasoning do
     messages.filter_map do |message|
       message.dig(:thinking_provider_info, :open_ai_responses, :encrypted_content)
     end
+  end
+
+  def call_ids(messages)
+    messages.filter_map { |message| message.dig(:provider_data, :open_ai_responses, :id) }
   end
 
   it "keeps all reasoning outside of a bot reply" do
@@ -128,6 +138,34 @@ RSpec.describe WbBotModelFallback::ForeignReasoning do
     text =
       described_class.with_model(fallback.id) { history }.map { |m| m[:content].to_s }.join("\n")
     expect(text).to include("Ответ основной", "Ответ запасной")
+  end
+
+  it "keeps tool call ids of all posts outside of a bot reply" do
+    expect(call_ids(history)).to contain_exactly("fc_primary", "fc_fallback")
+  end
+
+  it "drops tool call ids of the primary model when answering with the fallback, keeping the calls" do
+    messages = described_class.with_model(fallback.id) { history }
+    expect(call_ids(messages)).to eq(["fc_fallback"])
+    expect(messages.select { |m| m[:type] == :tool_call }.map { |m| m[:id] }).to contain_exactly(
+      "call_fc_primary",
+      "call_fc_fallback",
+    )
+  end
+
+  it "drops tool call ids of the fallback model when answering with the primary again" do
+    expect(call_ids(described_class.with_model(primary.id) { history })).to eq(["fc_primary"])
+  end
+
+  it "treats old bot posts without the model field as foreign only for the fallback model" do
+    PostCustomField.where(
+      post_id: primary_answer.id,
+      name: DiscourseAi::AiBot::POST_AI_LLM_MODEL_ID_FIELD,
+    ).delete_all
+
+    expect(call_ids(described_class.with_model(fallback.id) { history })).to eq(["fc_fallback"])
+    expect(encrypted(described_class.with_model(fallback.id) { history })).to eq(["enc-fallback"])
+    expect(call_ids(described_class.with_model(primary.id) { history })).to eq(["fc_primary"])
   end
 
   it "restores the thread state after the block" do
