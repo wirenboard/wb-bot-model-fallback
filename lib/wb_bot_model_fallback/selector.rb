@@ -15,7 +15,8 @@ module ::WbBotModelFallback
   # ставятся два флага для сообщений пользователю: «перешёл на облегчённую версию» (снимается после
   # первого удачного ответа запасной модели) и «был на облегчённой» (снимается после первого удачного
   # ответа основной модели, когда срок кончился). Флаги снимаются только после удачного ответа, чтобы
-  # сообщение не потерялось, если ответ не получился.
+  # сообщение не потерялось, если ответ не получился. Пока срок идёт, каждый N-й ответ запасной модели
+  # после первого начинается с напоминания; значение ключа срока — время его начала.
   class Selector
     COUNTED_FEATURES_SQL = "(feature_name = 'bot' OR feature_name LIKE 'automation - %')"
     # сколько после конца срока помнить, что пользователь был на запасной, чтобы сказать о возврате
@@ -40,6 +41,11 @@ module ::WbBotModelFallback
 
     def self.return_notice_key(user_id)
       "wb_bot_model_fallback:notice_return:#{user_id}"
+    end
+
+    # по ключу на каждое напоминание срока: 1 — первое (при N = 20 в 21-м ответе), 2 — второе…
+    def self.reminder_key(user_id, number)
+      "wb_bot_model_fallback:reminder:#{user_id}:#{number}"
     end
 
     def initialize(post:, current_model:)
@@ -79,6 +85,39 @@ module ::WbBotModelFallback
       return false if latched?
 
       Discourse.redis.del(self.class.return_notice_key(author.id)).to_i > 0
+    end
+
+    # Пора напомнить, что отвечает облегчённая версия: каждый N-й ответ запасной модели после первого
+    # (в нём было сообщение о переходе), при N = 20 — в 21-м, 41-м… ответе срока. Проверяется после
+    # ответа, когда его вызовы уже в журнале. Ключ напоминания ставится NX: два ответа, закончившиеся
+    # одновременно, не дадут двух напоминаний, а если счёт из-за них перескочит через 21-й ответ,
+    # напоминание придёт в следующем.
+    def take_reminder!
+      every = SiteSetting.wb_bot_model_fallback_reminder_every
+      return false if every <= 0
+
+      ttl = latch_ttl
+      return false if ttl.nil?
+
+      number = (fallback_answers_in_latch - 1) / every
+      return false if number < 1
+
+      !!Discourse.redis.set(self.class.reminder_key(author.id, number), 1, ex: ttl, nx: true)
+    end
+
+    # Ответы запасной модели с начала текущего срока — разные post_id, как и у основной.
+    def fallback_answers_in_latch
+      started = Discourse.redis.get(self.class.latch_key(author.id)).to_i
+      return 0 if started <= 0
+
+      started = [started, self.class.window.ago.to_i].max
+      AiApiAuditLog
+        .where(user_id: author.id, llm_id: self.class.fallback_llm_id)
+        .where("created_at >= ?", Time.zone.at(started))
+        .where(COUNTED_FEATURES_SQL)
+        .where.not(post_id: nil)
+        .distinct
+        .count(:post_id)
     end
 
     # Секунды до конца срока на запасной модели; nil — срока нет.

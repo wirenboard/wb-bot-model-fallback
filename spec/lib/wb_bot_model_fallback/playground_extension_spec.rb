@@ -53,6 +53,7 @@ RSpec.describe WbBotModelFallback::PlaygroundExtension do
     %i[latch_key switch_notice_key return_notice_key].each do |k|
       Discourse.redis.del(WbBotModelFallback::Selector.public_send(k, user.id))
     end
+    (1..5).each { |n| Discourse.redis.del(WbBotModelFallback::Selector.reminder_key(user.id, n)) }
   end
 
   # ответы основной моделью: у каждого свой post_id и по три вызова, как в настоящем журнале
@@ -70,6 +71,18 @@ RSpec.describe WbBotModelFallback::PlaygroundExtension do
         )
       end
     end
+  end
+
+  # вызовы одного ответа запасной моделью в журнале: заглушка ответов его не пишет
+  def log_fallback_answer
+    answered = Fabricate(:post, user: user)
+    Fabricate(
+      :ai_api_audit_log,
+      user_id: user.id,
+      post_id: answered.id,
+      llm_id: fallback.id,
+      feature_name: "bot",
+    )
   end
 
   def reply_to(post)
@@ -111,7 +124,7 @@ RSpec.describe WbBotModelFallback::PlaygroundExtension do
     log_answers(3)
     reply, = reply_to(question)
     expect(reply.raw).to match(
-      /\A> Вы задали помощнику 3 вопроса за сутки\. До \d\d\.\d\d в \d\d:\d\d \(МСК\)/,
+      /\A> \*\*Вы задали помощнику 3 вопроса за сутки\. До \d\d\.\d\d в \d\d:\d\d \(МСК\)/,
     )
     expect(reply.raw).to end_with("Ответ")
     expect(reply.raw).not_to include(fallback.display_name, primary.display_name)
@@ -130,10 +143,45 @@ RSpec.describe WbBotModelFallback::PlaygroundExtension do
 
     back, = reply_to(question)
     expect(model_id_of(back)).to eq(primary.id)
-    expect(back.raw).to start_with("> Снова отвечает основная версия помощника.")
+    expect(back.raw).to start_with("> **Снова отвечает основная версия помощника.**")
 
     later, = reply_to(question)
     expect(later.raw).not_to start_with(">")
+  end
+
+  it "reminds on every N-th answer of the lighter version, with the time the main one is back" do
+    SiteSetting.wb_bot_model_fallback_reminder_every = 2
+    log_answers(3)
+    first, = reply_to(question)
+    expect(first.raw).to start_with("> **Вы задали помощнику")
+    log_fallback_answer # вызовы первого ответа запасной
+
+    notices =
+      4.times.map do
+        log_fallback_answer # вызовы ответа, который сейчас напишет запасная
+        reply, = reply_to(question)
+        expect(model_id_of(reply)).to eq(fallback.id)
+        reply.raw[/\A> .*$/]
+      end
+
+    # ответы запасной № 2–5: напоминание в 3-м и 5-м
+    expect(notices.map(&:present?)).to eq([false, true, false, true])
+    expect(notices[1]).to match(
+      /\A> \*\*Напоминаем: сейчас на вопросы отвечает облегчённая версия помощника\. Основная версия вернётся \d\d\.\d\d в \d\d:\d\d \(МСК\)\.\*\*\z/,
+    )
+    # текст сверен целиком, так что названий моделей в нём нет; второе напоминание такое же
+    expect(notices[3]).to eq(notices[1])
+  end
+
+  it "shows no reminder when its text is empty" do
+    SiteSetting.wb_bot_model_fallback_reminder_every = 1
+    SiteSetting.wb_bot_model_fallback_notice_reminder = ""
+    log_answers(3)
+    reply_to(question)
+    2.times { log_fallback_answer }
+    reply, = reply_to(question)
+    expect(model_id_of(reply)).to eq(fallback.id)
+    expect(reply.raw).to eq("Ответ")
   end
 
   it "shows no notice when the texts are empty" do

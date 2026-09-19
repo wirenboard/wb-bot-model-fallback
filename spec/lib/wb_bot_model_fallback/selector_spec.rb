@@ -14,6 +14,7 @@ RSpec.describe WbBotModelFallback::Selector do
       %i[latch_key switch_notice_key return_notice_key].each do |k|
         Discourse.redis.del(described_class.public_send(k, u.id))
       end
+      (1..5).each { |n| Discourse.redis.del(described_class.reminder_key(u.id, n)) }
     end
   end
 
@@ -51,10 +52,11 @@ RSpec.describe WbBotModelFallback::Selector do
     Discourse.redis.ttl(described_class.latch_key(owner.id))
   end
 
-  it "defaults to 20 answers, a 24-hour switch and no limit for staff" do
+  it "defaults to 20 answers, a 24-hour switch, no limit for staff and a reminder every 20" do
     expect(SiteSetting.defaults[:wb_bot_model_fallback_daily_answers]).to eq(20)
     expect(SiteSetting.defaults[:wb_bot_model_fallback_hours]).to eq(24)
     expect(SiteSetting.defaults[:wb_bot_model_fallback_exempt_staff]).to eq(true)
+    expect(SiteSetting.defaults[:wb_bot_model_fallback_reminder_every]).to eq(20)
   end
 
   it "keeps the primary model below the threshold" do
@@ -173,5 +175,62 @@ RSpec.describe WbBotModelFallback::Selector do
   it "ignores posts written by bots and the system user" do
     log_answers(5)
     expect(selected(Fabricate(:post, user: Discourse.system_user))).to be_nil
+  end
+
+  describe "reminders while on the fallback model" do
+    before { SiteSetting.wb_bot_model_fallback_reminder_every = 2 }
+
+    # ответы запасной моделью в текущем сроке; вызовы ответа попадают в журнал раньше плашки
+    def log_fallback(count)
+      log_answers(count, llm: fallback, at: Time.zone.now)
+    end
+
+    def switched_selector
+      log_answers(3)
+      described_class.new(post: post, current_model: primary).tap(&:fallback_model)
+    end
+
+    it "reminds on every N-th fallback answer after the one with the switch notice" do
+      selector = switched_selector
+      reminded =
+        5.times.map do
+          log_fallback(1)
+          selector.take_reminder!
+        end
+      # ответы срока № 1–5: в первом сообщение о переходе, напоминания в 3-м и 5-м
+      expect(reminded).to eq([false, false, true, false, true])
+    end
+
+    it "gives one reminder when two answers finish at the same time" do
+      selector = switched_selector
+      log_fallback(3)
+      expect(selector.take_reminder!).to eq(true)
+      expect(described_class.new(post: post, current_model: primary).take_reminder!).to eq(false)
+    end
+
+    it "does not lose a reminder when concurrent answers skip its number" do
+      selector = switched_selector
+      log_fallback(4)
+      expect(selector.take_reminder!).to eq(true)
+    end
+
+    it "counts only fallback answers of the current period" do
+      log_answers(5, llm: fallback, at: 2.hours.ago)
+      selector = switched_selector
+      log_fallback(1)
+      expect(selector.fallback_answers_in_latch).to eq(1)
+      expect(selector.take_reminder!).to eq(false)
+    end
+
+    it "does not remind when the interval is zero or there is no period" do
+      SiteSetting.wb_bot_model_fallback_reminder_every = 0
+      selector = switched_selector
+      log_fallback(5)
+      expect(selector.take_reminder!).to eq(false)
+
+      SiteSetting.wb_bot_model_fallback_reminder_every = 2
+      Discourse.redis.del(described_class.latch_key(user.id))
+      expect(selector.take_reminder!).to eq(false)
+    end
   end
 end

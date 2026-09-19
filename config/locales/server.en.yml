@@ -1,6 +1,8 @@
 en:
   site_settings:
     wb_bot_model_fallback_notice_switch: "Notice at the top of the first reply from the lighter version. Placeholders: %{questions} is the threshold with the Russian word for questions, %{answers} is the bare number, %{until} is the end of the period in Moscow time. Empty disables it. Do not name the models."
+    wb_bot_model_fallback_reminder_every: "Every N-th reply of the lighter version starts with a reminder that the lighter version is answering and when the main one returns. Counted from the reply with the switch notice: with 20, reminders come in the 21st, 41st and later replies of the period. 0 disables reminders."
+    wb_bot_model_fallback_notice_reminder: "Reminder text. Same placeholders as the switch notice: %{until} is the end of the period in Moscow time, %{questions}, %{answers}. Empty disables reminders. Do not name the models."
     wb_bot_model_fallback_notice_return: "Notice at the top of the first reply from the main version after the period ends. Empty disables it."
     wb_bot_model_fallback_enabled: "Move a user to the AI bot's fallback model once they have received the configured number of replies from the primary model within a day. Does nothing until a fallback model is selected."
     wb_bot_model_fallback_daily_answers: "How many replies from the primary model a user gets within a rolling day. The next question moves them to the fallback model. Counts bot replies in PMs and automation replies, not individual model calls; replies from the fallback model are not counted."

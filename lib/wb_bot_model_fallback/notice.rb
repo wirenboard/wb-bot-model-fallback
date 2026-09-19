@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 module ::WbBotModelFallback
-  # Плашка в начале ответа бота: «перешли на облегчённую версию» или «снова основная».
+  # Плашка в начале ответа бота: «перешли на облегчённую версию», напоминание об этом каждые N ответов
+  # облегчённой версии или «снова основная».
   # Тексты — настройки сайта; %{questions} — порог со склонённым словом («20 вопросов»),
   # %{answers} — только число, %{until} — конец срока по Москве. Модели не называются.
   module Notice
@@ -13,7 +14,12 @@ module ::WbBotModelFallback
 
       text =
         if switched
-          switch_text(selector) if selector.take_switch_notice!
+          if selector.take_switch_notice!
+            switch_text(selector)
+          elsif SiteSetting.wb_bot_model_fallback_notice_reminder.present? &&
+                selector.take_reminder!
+            render(SiteSetting.wb_bot_model_fallback_notice_reminder, selector)
+          end
         elsif selector.take_return_notice!
           SiteSetting.wb_bot_model_fallback_notice_return
         end
@@ -31,7 +37,10 @@ module ::WbBotModelFallback
     end
 
     def self.switch_text(selector)
-      template = SiteSetting.wb_bot_model_fallback_notice_switch
+      render(SiteSetting.wb_bot_model_fallback_notice_switch, selector)
+    end
+
+    def self.render(template, selector)
       return if template.blank?
 
       threshold = SiteSetting.wb_bot_model_fallback_daily_answers
